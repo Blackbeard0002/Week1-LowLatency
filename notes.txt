@@ -1,0 +1,153 @@
+CSoT Week-1 — Local Profiling & Benchmarking Notes
+==================================================
+
+All commands assume you are in this project directory:
+
+  cd work
+
+
+1) ONE-TIME SETUP
+-----------------
+
+Install Google Benchmark (for bench_runner):
+
+  sudo apt-get update
+  sudo apt-get install -y libbenchmark-dev
+
+Install KCachegrind (visual call graph):
+
+  sudo apt-get install -y kcachegrind
+
+Valgrind (Callgrind) is usually preinstalled on Ubuntu. Check:
+
+  valgrind --version
+
+
+2) BUILD TARGETS
+----------------
+
+Release build (leaderboard .so + fast local runs):
+
+  cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
+  cmake --build build/release
+
+Profile build (debug symbols for KCachegrind line annotations):
+
+  cmake -S . -B build/profile -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  cmake --build build/profile
+
+Useful individual targets:
+
+  cmake --build build/release --target quant_runner
+  cmake --build build/release --target spec_strategy
+  cmake --build build/release --target bench_runner
+
+
+3) HISTOGRAM PERCENTILES (quant_runner)
+---------------------------------------
+
+quant_runner loads CSV, runs strategy tick-by-tick, prints latency histogram
+(median/p90/p99/p999) from include/histogram.hpp.
+
+Examples:
+
+  ./build/release/quant_runner data/tiny.csv
+  ./build/release/quant_runner data/synthetic_small.csv
+  ./build/release/quant_runner data/synthetic_large.csv
+
+Expected output shape:
+
+  10000 ticks processed
+  count = 10000
+  p50  <= 64 ns
+  p90  <= 64 ns
+  p99  <= 128 ns
+  p999 <= 256 ns
+
+Notes:
+- These are per-tick on_tick() latencies measured with std::chrono::steady_clock.
+- Compare Release vs Release only when tuning.
+- Debug builds are much slower and not comparable to leaderboard numbers.
+
+
+4) GOOGLE BENCHMARK (bench_runner)
+----------------------------------
+
+Isolated strategy throughput benchmark (not the judge metric, but useful for A/B).
+
+Build + run:
+
+  cmake --build build/release --target bench_runner
+  ./build/release/bench_runner --benchmark_min_time=1.0
+
+More options:
+
+  ./build/release/bench_runner --benchmark_filter=BM_SpecStrategy
+  ./build/release/bench_runner --benchmark_repetitions=5
+  ./build/release/bench_runner --benchmark_report_aggregates_only=true
+
+Read output columns:
+- Time     : average time per benchmark iteration
+- CPU      : CPU time per iteration
+- Iterations: how many times benchmark loop ran
+- items/s  : ticks processed per second (SetItemsProcessed in bench.cpp)
+
+
+5) VISUAL CALL GRAPH (KCachegrind + Callgrind)
+----------------------------------------------
+
+WSL2 note: perf hardware counters usually do NOT work on WSL2.
+Use Callgrind + KCachegrind instead.
+
+Step A — capture profile (strategy-focused; recommended):
+
+  cmake --build build/profile --target bench_runner
+
+  valgrind --tool=callgrind --cache-sim=yes --branch-sim=yes \
+    --callgrind-out-file=callgrind.bench_runner.out \
+    ./build/profile/bench_runner --benchmark_min_time=0.5
+
+Step B — open visual call graph:
+
+  kcachegrind callgrind.bench_runner.out
+
+Alternative: full engine+loader profile:
+
+  cmake --build build/profile --target quant_runner
+
+  valgrind --tool=callgrind --cache-sim=yes --branch-sim=yes \
+    --callgrind-out-file=callgrind.quant_runner.out \
+    ./build/profile/quant_runner data/synthetic_small.csv
+
+  kcachegrind callgrind.quant_runner.out
+
+Text-only fallback (no GUI):
+
+  callgrind_annotate --tree=both callgrind.bench_runner.out | less
+  callgrind_annotate --auto=yes callgrind.bench_runner.out | less
+
+
+6) BUILD & SUBMIT .so TO JUDGE
+------------------------------
+
+  cmake --build build/release --target spec_strategy
+  ls -lh build/release/libspec_strategy.so
+  nm -D build/release/libspec_strategy.so | grep create_strategy
+
+Upload libspec_strategy.so to the leaderboard.
+
+
+7) QUICK TROUBLESHOOTING
+------------------------
+
+- bench_runner target missing:
+    install libbenchmark-dev, re-run cmake configure.
+
+- KCachegrind window does not open on WSL:
+    use WSLg (Windows 11) or run kcachegrind from a Linux desktop/VM.
+
+- cg_annotate shows ??? instead of source lines:
+    rebuild with RelWithDebInfo (build/profile), not plain Release.
+
+- perf stat fails on WSL2:
+    expected; use Callgrind/KCachegrind instead.
