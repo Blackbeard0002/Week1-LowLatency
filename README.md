@@ -123,20 +123,6 @@ Upload `build/release/libspec_strategy.so`.
 | `bench/` | Google Benchmark hot-path harness |
 | `data/` | tick generator + CSV fixtures |
 
-## Optimizations
-
-All in `strategies/spec_strategy.cpp` unless noted.
-
-1. **O(1) rolling window** — running `sum` / `sum_sq` instead of rescanning 64 mids each tick.
-2. **No `unordered_map` on the hot path** — `std::array<SymbolState, 64>` with dense symbol ids.
-3. **Fast `SYM*` parsing** — direct digit parse for `SYM0`…`SYM3`.
-4. **`always_inline` helpers** — `rolling_kernel`, `resolve_symbol_id`, `parse_sym_id`.
-5. **Algebraic z-score checks** — compare against `ENTRY_Z * stddev` without dividing every tick.
-6. **Stable symbol storage** (`engine.cpp`) — intern strings so `Tick::symbol` views stay valid.
-7. **Release flags on `.so`** — `-O3`, LTO, `-fno-exceptions -fno-rtti`.
-
-Tried a member `vector` scratch buffer for orders; throughput got worse (extra move every tick), so it was reverted.
-
 ## Profiling
 
-See `notes.txt` for Callgrind/KCachegrind commands, Google Benchmark usage, and troubleshooting. Most self time in my profile sits in `SpecStrategy::on_tick` (rolling stats, symbol lookup, vector return path).
+See `notes.txt` for Callgrind/KCachegrind commands, Google Benchmark usage, and troubleshooting.
